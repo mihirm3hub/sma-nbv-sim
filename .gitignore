@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Envs & tooling
+.venv/
+venv/
+.env
+.ideas/
+.idea/
+.vscode/
+.DS_Store
+
+# Results / artifacts
+experiments/results/
+**/depth/
+**/red_depth/
+**/diag/
+*.ply
+*_depth.png
+*_coverage.png
+coverage_*.png
+*.npz
+cam_stats.csv
+sma_selected.csv
+random_selected.csv
+
+# Jupyter (if you add notebooks)
+.ipynb_checkpoints/
+*.ipynb
+
+# Build & packaging
+build/
+dist/
+*.egg-info/

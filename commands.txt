@@ -1,0 +1,4 @@
+python fuse_tsdf.py --cfg experiments\configs\can_hemisphere.yaml --frame object --samples 256 --min-valid-frac 0.02 --refocus --refocus-scales 1.0,0.85,0.7 --save-diag --voxel 0.001 --trunc 0.005
+python render_multi_depth.py --cfg experiments/configs/can_hemisphere.yaml --frame object --cam-stats experiments/results/cam_stats.csv --out-dir experiments/results/red_depth --max-views 96
+python visualize.py --cfg experiments\configs\can_hemisphere.yaml --frame world --samples 256
+python visualize.py --cfg experiments\configs\can_hemisphere.yaml --frame object --samples 256 

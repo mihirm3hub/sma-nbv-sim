@@ -1,0 +1,1 @@
+print('Figure script stub.')
