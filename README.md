@@ -47,7 +47,7 @@ SMA-NBV/
 Clone the repo:
 
 ```bash
-git clone https://github.com/<your-username>/SMA-NBV.git
+git clone https://github.com/mihirm3hub/sma-nbv-sim.git
 cd SMA-NBV
 ```
 
@@ -75,17 +75,13 @@ python visualize.py --cfg experiments/configs/can_hemisphere.yaml
 ### 2️⃣ Fuse all views as baseline
 
 ```bash
-python fuse_tsdf.py --cfg experiments/configs/can_hemisphere.yaml \
-    --voxel 0.004 --trunc 0.012 --out experiments/results/tsdf_mesh.ply
+python fuse_tsdf.py --cfg experiments/configs/can_hemisphere.yaml --voxel 0.002 --trunc 0.008 --out experiments/results/tsdf_mesh.ply
 ```
-
+ 
 ### 3️⃣ Run SMA NBV with 3D coverage scoring
 
 ```bash
-python sma_nbv.py --cfg experiments/configs/can_hemisphere.yaml \
-    --budget 16 --use-3d-coverage --surf-samples 6000 \
-    --voxel 0.004 --trunc 0.012 \
-    --baseline-mesh experiments/results/tsdf_mesh.ply
+python sma_nbv.py --cfg experiments/configs/can_hemisphere.yaml --budget 16 --use-3d-coverage --surf-samples 6000--voxel 0.002 --trunc 0.008 --baseline-mesh experiments/results/tsdf_mesh.ply
 ```
 
 Outputs:
