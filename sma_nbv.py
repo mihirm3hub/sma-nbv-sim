@@ -1,7 +1,7 @@
-# sma_nbv.py — SMA-guided NBV over hemisphere candidates + TSDF fusion
-# Adds optional 3-way viewer: GT | Baseline (fuse_tsdf.py) | SMA
-# NEW: --use-3d-coverage uses surface-area coverage (front-facing & visible) for scoring.
-# NEW: A second viewer shows camera viewpoints (all, selected, actually used) + frustums/rays.
+# sma_nbv.py — SMA/Greedy/Random NBV over hemisphere candidates + TSDF fusion
+# Viewers: (1) GT | Baseline | Selected-Mesh   (2) Camera viewpoints (all/selected/used)
+# 3D-coverage option: --use-3d-coverage (front-facing & visible surface-area)
+# NEW: --method {sma,greedy,random} and per-step coverage logging to a common CSV.
 
 import argparse, os, copy, math, csv
 import numpy as np
@@ -76,7 +76,7 @@ def compute_view_score_2d(scene,
     score = w1 * cov + w2 * qual + w3 * det - w4 * ovp
     return score, mask, depth_z
 
-# -------------------- NEW: 3D surface-coverage helpers --------------------
+# -------------------- 3D surface-coverage helpers --------------------
 
 def _normalize(v):
     n = np.linalg.norm(v, axis=-1, keepdims=True)
@@ -110,21 +110,28 @@ def sample_surface_points(mesh, n=6000, seed=0):
     W = tri_area[face_idx] / (prob[face_idx] * n + 1e-9)
     return P.astype(np.float32), N.astype(np.float32), W.astype(np.float32)
 
-def visible_area_gain(scene, cam_pos, target, P, N, W, front_thresh=0.2, eps=1e-4):
+def visible_area_gain(scene, cam_pos, target, P, N, W, front_thresh=0.1, eps=5e-4):
+    """
+    Return visibility mask for sampled surface points as seen from cam_pos.
+    Rays are cast FROM the camera TO the points (robust with RaycastingScene).
+    """
     cam_T = look_at_cv(cam_pos, target)
-    C = cam_T[:3, 3]
-    VEC = P - C
+    C = cam_T[:3, 3]                               # camera origin (world)
+    VEC = P - C                                     # cam -> point
     dist = np.linalg.norm(VEC, axis=1) + 1e-9
-    DIRc = VEC / dist[:,None]  # from cam to point
-    # front-facing wrt camera (normal points roughly toward camera)
-    ff = (np.sum(N * (-DIRc), axis=1) > front_thresh)
+    DIR  = VEC / dist[:, None]
 
-    # occlusion check: from just above surface back toward camera
-    origins = P + N * eps
-    rays = np.concatenate([origins, -DIRc], axis=1).astype(np.float32)
+    # Front-facing: normal points roughly toward camera
+    ff = (np.sum(N * (-DIR), axis=1) > front_thresh)
+
+    # Cast rays from the camera origin along DIR
+    origins = np.repeat(C[None, :], len(P), axis=0)
+    rays = np.concatenate([origins, DIR], axis=1).astype(np.float32)
     out = scene.cast_rays(o3d.core.Tensor(rays))
-    t_hit = out["t_hit"].numpy()
-    vis = ff & (np.isfinite(t_hit) & (t_hit >= (dist - 2*eps)))
+    t_hit = out["t_hit"].numpy()                    # distance along DIR to first hit
+
+    # Visible if we hit and the hit distance matches the point distance (within tolerance)
+    vis = ff & np.isfinite(t_hit) & (np.abs(t_hit - dist) <= 2 * eps)
     return vis, W, cam_T
 
 def compute_view_score_3d(scene, cam_pos, target_point, intr,
@@ -156,7 +163,7 @@ def compute_view_score_3d(scene, cam_pos, target_point, intr,
     score = w1*cov_area + w2*qual + w3*det + div_weight*diversity - w4*float(mask.mean())
     return score, mask, depth_z, vis, dir_w
 
-# -------------------- discrete SMA (over candidate indices) --------------------
+# -------------------- optimizers (return indices AND coverage curve) --------------------
 
 def sma_optimize(scene, cams, target_point, intr,
                  depth_trunc, weights,
@@ -167,11 +174,12 @@ def sma_optimize(scene, cams, target_point, intr,
     N = len(cams)
     H, W = intr["height"], intr["width"]
 
-    # state for 2D score
+    # 2D state
     covered_mask = np.zeros((H, W), dtype=np.uint8)
     selected_masks = []
+    curve = []  # list of coverage fraction after each pick
 
-    # state for 3D score
+    # 3D state
     if use_3d:
         assert P_surf is not None and N_surf is not None and W_surf is not None
         covered_pts = np.zeros(len(P_surf), dtype=bool)
@@ -191,9 +199,8 @@ def sma_optimize(scene, cams, target_point, intr,
         pop_idx = rng.choice(list(remaining), size=init_size, replace=False)
         fitness = np.zeros(init_size, dtype=np.float32)
 
-        # caches
-        cache_2d = {}      # idx -> (score, mask)
-        cache_3d = {}      # idx -> (score, mask, vis, dir)
+        cache_2d = {}
+        cache_3d = {}
 
         # evaluate initial
         for i, idx in enumerate(pop_idx):
@@ -231,7 +238,6 @@ def sma_optimize(scene, cams, target_point, intr,
                 new_idx = int(np.clip(new_idx, 0, N-1))
 
                 if new_idx not in remaining:
-                    # try to snap to an available candidate
                     for _try in range(2):
                         trial = int(rng.choice(list(remaining)))
                         if trial != idx:
@@ -276,18 +282,93 @@ def sma_optimize(scene, cams, target_point, intr,
             s, m, vis, dvec = cache_3d[choose_idx]
             covered_pts |= vis
             selected_dirs.append(dvec)
-            covered_pct = 100.0 * covered_pts.mean()
+            covered_frac = float((W_surf[covered_pts].sum()) / (W_surf.sum() + 1e-12))
+            curve.append(covered_frac)
             if verbose:
-                print(f"Picked idx {choose_idx}  score={s:.4f}  3D covered≈{covered_pct:.2f}%")
+                print(f"Picked idx {choose_idx}  score={s:.4f}  3D covered≈{covered_frac*100:.2f}%")
         else:
             s, m = cache_2d[choose_idx]
             selected_masks.append(m.copy())
             covered_mask = np.logical_or(covered_mask == 1, m == 1).astype(np.uint8)
-            covered_pct = 100.0 * (covered_mask.sum() / covered_mask.size)
+            covered_frac = float(covered_mask.mean())
+            curve.append(covered_frac)
             if verbose:
-                print(f"Picked idx {choose_idx}  score={s:.4f}  2D covered≈{covered_pct:.2f}%")
+                print(f"Picked idx {choose_idx}  score={s:.4f}  2D covered≈{covered_frac*100:.2f}%")
 
-    return selected
+    return selected, curve
+
+def greedy_optimize(scene, cams, target_point, intr,
+                    depth_trunc, weights,
+                    budget=16, seed=0, verbose=True,
+                    use_3d=False, P_surf=None, N_surf=None, W_surf=None,
+                    div_weight=0.15, front_thresh=0.2):
+    rng = np.random.default_rng(seed)
+    N = len(cams)
+    H, W = intr["height"], intr["width"]
+
+    covered_mask = np.zeros((H, W), dtype=np.uint8)
+    selected_masks = []
+    curve = []
+
+    if use_3d:
+        assert P_surf is not None and N_surf is not None and W_surf is not None
+        covered_pts = np.zeros(len(P_surf), dtype=bool)
+        selected_dirs = []
+
+    remaining = set(range(N))
+    selected = []
+
+    for step in range(budget):
+        if not remaining:
+            break
+        best_idx, best_s, best_m, best_vis, best_dir = -1, -1e9, None, None, None
+        for idx in list(remaining):
+            if use_3d:
+                s, m, _, vis, dvec = compute_view_score_3d(
+                    scene, cams[idx], target_point, intr,
+                    P_surf, N_surf, W_surf, covered_pts,
+                    selected_dirs, depth_trunc, weights,
+                    div_weight=div_weight, front_thresh=front_thresh
+                )
+                if s > best_s:
+                    best_idx, best_s, best_m, best_vis, best_dir = idx, s, m, vis, dvec
+            else:
+                s, m, _ = compute_view_score_2d(
+                    scene, cams[idx], target_point, intr,
+                    covered_mask=covered_mask, selected_masks=selected_masks,
+                    depth_trunc=depth_trunc, weights=weights
+                )
+                if s > best_s:
+                    best_idx, best_s, best_m = idx, s, m
+
+        selected.append(best_idx)
+        remaining.discard(best_idx)
+        if use_3d:
+            covered_pts |= best_vis
+            selected_dirs.append(best_dir)
+            covered_frac = float((W_surf[covered_pts].sum()) / (W_surf.sum() + 1e-12))
+            curve.append(covered_frac)
+            if verbose:
+                print(f"[Greedy {step+1}/{budget}] pick {best_idx}  score={best_s:.4f}  3D covered≈{covered_frac*100:.2f}%")
+        else:
+            selected_masks.append(best_m.copy())
+            covered_mask = np.logical_or(covered_mask == 1, best_m == 1).astype(np.uint8)
+            covered_frac = float(covered_mask.mean())
+            curve.append(covered_frac)
+            if verbose:
+                print(f"[Greedy {step+1}/{budget}] pick {best_idx}  score={best_s:.4f}  2D covered≈{covered_frac*100:.2f}%")
+
+    return selected, curve
+
+def random_optimize(cams, budget=16, seed=0):
+    rng = np.random.default_rng(seed)
+    N = len(cams)
+    idx = np.arange(N)
+    rng.shuffle(idx)
+    selected = idx[:budget].tolist()
+    # no internal coverage here; coverage curve will be filled during fuse/eval if needed
+    curve = []  # left empty to avoid confusion; we'll recompute below if desired
+    return selected, curve
 
 # -------------------- TSDF fuse (selected only) --------------------
 
@@ -434,20 +515,18 @@ def camera_view_window(mesh, intr, cams, target_point, selected_idx, used_idx):
     # all candidates (light gray)
     geoms += make_spheres(cams, radius=0.006, color=(0.7, 0.7, 0.7))
 
-    # selected by SMA (blue)
+    # selected (blue)
     if len(selected_idx):
         geoms += make_spheres(cams[selected_idx], radius=0.009, color=(0.2, 0.4, 1.0))
 
-    # actually used (integrated) (green) + frustums and some rays
+    # used/integrated (green) + rays + frustums
     used_pts = cams[used_idx] if len(used_idx) else np.zeros((0,3))
-    geoms += make_spheres(used_pts, radius=0.011, color=(0.1, 0.8, 0.2))
-    geoms.append(make_rays(used_pts, target_point, every=max(1, len(used_pts)//24), color=(0.2,0.7,0.2)))
-
-    # frustums for used
+    geoms += make_spheres(used_pts, radius=0.011, color=(0.10, 0.45, 0.95))
+    geoms.append(make_rays(used_pts, target_point, every=max(1, len(used_pts)//24), color=(0.10, 0.45, 0.95)))
     for p in used_pts:
         T = look_at_cv(p, target_point)
         dist = float(np.linalg.norm(target_point - p))
-        geoms.append(make_frustum(intr, T, near=0.05, far=max(0.15, 0.3*dist), color=(0.1, 0.8, 0.2)))
+        geoms.append(make_frustum(intr, T, near=0.05, far=max(0.15, 0.3*dist), color=(0.10, 0.45, 0.95)))
 
     o3d.visualization.draw_geometries(
         geoms,
@@ -455,6 +534,19 @@ def camera_view_window(mesh, intr, cams, target_point, selected_idx, used_idx):
         width=1400, height=850,
         lookat=target_point.tolist(), front=[0,-1,0], up=[0,0,1], zoom=0.7
     )
+
+# -------------------- logging: coverage-by-method CSV --------------------
+
+def append_coverage_log(path, method, curve, seed, budget, use_3d, obj_name="unknown"):
+    """Append per-step coverage to a shared CSV for later plotting."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    new_file = not os.path.isfile(path)
+    with open(path, "a", newline="") as f:
+        w = csv.writer(f)
+        if new_file:
+            w.writerow(["method", "step", "coverage_fraction", "seed", "budget", "use_3d", "object"])
+        for step, cov in enumerate(curve, start=1):
+            w.writerow([method, step, float(cov), int(seed), int(budget), int(use_3d), obj_name])
 
 # -------------------- main --------------------
 
@@ -475,7 +567,10 @@ def main(cfg_path,
          use_3d_coverage=False,
          surf_samples=6000,
          div_weight=0.15,
-         front_thresh=0.2):
+         front_thresh=0.2,
+         method="sma",                         # NEW: selection method
+         covlog_csv="experiments/results/coverage_by_method.csv"  # NEW: shared log
+         ):
 
     os.makedirs(os.path.dirname(out_mesh), exist_ok=True)
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
@@ -511,7 +606,7 @@ def main(cfg_path,
         target_point = center_w
         print("Using WORLD-frame hemisphere.")
 
-    print(f"Candidates: {len(cams)} | Budget: {budget} | SMA pop:{sma_pop} iters:{sma_iters}")
+    print(f"Candidates: {len(cams)} | Budget: {budget} | Method: {method} | SMA pop:{sma_pop} iters:{sma_iters}")
     weights = (float(w1), float(w2), float(w3), float(w4))
     depth_trunc = max(1.0, 1.5 * trunc)
 
@@ -521,14 +616,44 @@ def main(cfg_path,
         print(f"Sampling {surf_samples} surface points for 3D coverage scoring…")
         P_surf, N_surf, W_surf = sample_surface_points(gt_mesh, n=int(surf_samples), seed=seed)
 
-    # SMA selection
-    sel_idx = sma_optimize(
-        scene, cams, target_point, intr,
-        depth_trunc=depth_trunc, weights=weights,
-        budget=budget, pop=sma_pop, iters=sma_iters, seed=seed, verbose=True,
-        use_3d=use_3d_coverage, P_surf=P_surf, N_surf=N_surf, W_surf=W_surf,
-        div_weight=div_weight, front_thresh=front_thresh
-    )
+    # Select cameras
+    if method == "sma":
+        sel_idx, curve = sma_optimize(
+            scene, cams, target_point, intr,
+            depth_trunc=depth_trunc, weights=weights,
+            budget=budget, pop=sma_pop, iters=sma_iters, seed=seed, verbose=True,
+            use_3d=use_3d_coverage, P_surf=P_surf, N_surf=N_surf, W_surf=W_surf,
+            div_weight=div_weight, front_thresh=front_thresh
+        )
+    elif method == "greedy":
+        sel_idx, curve = greedy_optimize(
+            scene, cams, target_point, intr,
+            depth_trunc=depth_trunc, weights=weights,
+            budget=budget, seed=seed, verbose=True,
+            use_3d=use_3d_coverage, P_surf=P_surf, N_surf=N_surf, W_surf=W_surf,
+            div_weight=div_weight, front_thresh=front_thresh
+        )
+    else:  # random
+        sel_idx, _ = random_optimize(cams, budget=budget, seed=seed)
+        # build a coverage curve for random (so logs are comparable)
+        curve = []
+        if use_3d_coverage:
+            covered = np.zeros(len(P_surf), dtype=bool)
+            for k, i in enumerate(sel_idx, start=1):
+                vis, w, _ = visible_area_gain(scene, cams[i], target_point, P_surf, N_surf, W_surf,
+                                              front_thresh=front_thresh)
+                covered |= vis
+                curve.append(float(W_surf[covered].sum() / (W_surf.sum() + 1e-12)))
+        else:
+            H, W = intr["height"], intr["width"]
+            covered_mask = np.zeros((H, W), dtype=np.uint8)
+            for k, i in enumerate(sel_idx, start=1):
+                cam_T = look_at_cv(cams[i], target_point)
+                depth_z = render_depth_z_cv(scene, cam_T, intr, depth_trunc=depth_trunc)
+                m = (depth_z > 0).astype(np.uint8)
+                covered_mask = np.logical_or(covered_mask == 1, m == 1).astype(np.uint8)
+                curve.append(float(covered_mask.mean()))
+
     print("Selected indices:", sel_idx)
 
     # Save chosen cameras
@@ -540,10 +665,15 @@ def main(cfg_path,
             w.writerow([i, p[0], p[1], p[2]])
     print(f"Saved selected cameras: {out_csv}")
 
+    # Append coverage log for this run
+    obj_name = os.path.splitext(os.path.basename(cfg["mesh_path"]))[0]
+    append_coverage_log(covlog_csv, method, curve, seed, budget, use_3d_coverage, obj_name=obj_name)
+    print(f"Appended coverage to: {covlog_csv}")
+
     # Fuse only selected
     sma_mesh, used = fuse_selected(scene, intr, cams, target_point, sel_idx, voxel=voxel, trunc=trunc)
     o3d.io.write_triangle_mesh(out_mesh, sma_mesh)
-    print(f"SMA mesh saved: {out_mesh} | used {len(used)}/{len(sel_idx)} selected")
+    print(f"Mesh saved: {out_mesh} | used {len(used)}/{len(sel_idx)} selected")
 
     # (Optional) load baseline mesh from fuse_tsdf.py
     baseline_mesh = None
@@ -559,8 +689,8 @@ def main(cfg_path,
     # Tri- (or bi-) view viz
     tri_view(
         gt_mesh, baseline_mesh, sma_mesh,
-        title="GT (left) | Baseline (center) | SMA (right)" if baseline_mesh is not None
-              else "GT (left) | SMA (right)"
+        title=f"GT (left) | Baseline (center) | {method.upper()} (right)" if baseline_mesh is not None
+              else f"GT (left) | {method.upper()} (right)"
     )
 
     # Second viewer: camera viewpoints (all, selected, used) + frustums/rays
@@ -592,7 +722,7 @@ if __name__ == "__main__":
     ap.add_argument("--out-csv", type=str, default="experiments/results/sma_selected.csv")
     ap.add_argument("--baseline-mesh", type=str, default="", help="Path to baseline mesh from fuse_tsdf.py")
 
-    # NEW flags (added earlier; unchanged)
+    # 3D coverage flags
     ap.add_argument("--use-3d-coverage", action="store_true",
                     help="Score views by newly revealed surface area (front-facing & visible) instead of 2D depth mask.")
     ap.add_argument("--surf-samples", type=int, default=6000,
@@ -601,6 +731,12 @@ if __name__ == "__main__":
                     help="Weight for angular diversity bonus in 3D scoring.")
     ap.add_argument("--front-thresh", type=float, default=0.2,
                     help="Front-facing threshold (dot(normal, view)>thr) for 3D coverage.")
+
+    # NEW: method + shared coverage log
+    ap.add_argument("--method", choices=["sma","greedy","random"], default="sma",
+                    help="Selection strategy to use.")
+    ap.add_argument("--covlog-csv", type=str, default="experiments/results/coverage_by_method.csv",
+                    help="Append per-step coverage here for cross-method plotting.")
 
     args = ap.parse_args()
 
@@ -620,4 +756,6 @@ if __name__ == "__main__":
          use_3d_coverage=args.use_3d_coverage,
          surf_samples=args.surf_samples,
          div_weight=args.div_weight,
-         front_thresh=args.front_thresh)
+         front_thresh=args.front_thresh,
+         method=args.method,
+         covlog_csv=args.covlog_csv)
