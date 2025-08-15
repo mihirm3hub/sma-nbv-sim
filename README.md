@@ -1,4 +1,4 @@
-# 📸 SMA-NBV: Slime Mould Algorithm for Next-Best-View Selection
+# 📸 SMA-NBV: Coverage-Aware Next-Best-View via Slime Mould Optimization for Object-Centric 3D Reconstruction
 
 This repository implements a **Slime Mould Algorithm (SMA)**-based Next-Best-View (NBV) planner over hemisphere camera candidates, with **TSDF fusion** to reconstruct a 3D mesh.
 It supports both **2D depth-mask coverage** and **3D surface-area coverage** scoring, with optional diversity penalties to reduce redundant views.
