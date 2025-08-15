@@ -83,7 +83,7 @@ python fuse_tsdf.py --cfg experiments/configs/can_hemisphere.yaml --voxel 0.002 
 ### 3️⃣ Run SMA NBV with 3D coverage scoring
 
 ```bash
-python sma_nbv.py --cfg experiments/configs/can_hemisphere.yaml --budget 16 --use-3d-coverage --surf-samples 6000--voxel 0.002 --trunc 0.008 --baseline-mesh experiments/results/tsdf_mesh.ply
+python sma_nbv.py --cfg experiments/configs/can_hemisphere.yaml --frame world --method sma --budget 24 --samples 256 --use-3d-coverage --surf-samples 20000  --voxel 0.001 --trunc 0.005 --baseline-mesh experiments/results/tsdf_mesh.ply
 ```
 
 Outputs:
