@@ -50,7 +50,7 @@ Clone the repo:
 
 ```bash
 git clone https://github.com/mihirm3hub/sma-nbv-sim.git
-cd SMA-NBV
+cd sma-nbv-sim 
 ```
 
 Install dependencies:
