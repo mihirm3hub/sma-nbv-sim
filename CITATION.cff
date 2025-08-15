@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "SMA-NBV: Slime Mould Algorithm for Next-Best-View Planning"
+authors:
+  - family-names: Mihir Milind Mainkar
+    given-names: Mihir
+    orcid: "https://orcid.org/0009-0009-6365-9084"   
+license: APACHE 2.0
+version: "0.1.0"
+date-released: "2025-08-15"
+repository-code: "https://github.com/mihirm3hub/sma-nbv-sim.git"
+abstract: >
+  An SMA-guided next-best-view planner with a coverage-aware utility and TSDF
+  evaluation pipeline for object-centric 3D reconstruction.
+preferred-citation:
+  type: misc
+  title: "SMA-NBV: Slime Mould Algorithm for Next-Best-View Planning"
+  year: 2025
+  authors:
+    - family-names: Mihir Milind Mainkar
+      given-names: Mihir
+  url: "https://github.com/mihirm3hub/sma-nbv-sim.git"

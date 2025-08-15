@@ -178,19 +178,19 @@ The `.gitignore` is set to ignore:
 
 ## 📜 License
 
-MIT License (adjust as needed).
+Apache 2.0. © Mihir Milind Mainkar
 
 ---
 
 ## 🙌 Citation
 
-If you use this code in research:
+If you use this code in research, please cite:
 
 ```
 @misc{sma-nbv,
-  author = {Your Name},
+  author = {Mihir Milind Mainkar},
   title = {SMA-NBV: Slime Mould Algorithm for Next-Best-View Planning},
   year = {2025},
-  howpublished = {\url{https://github.com/<your-username>/SMA-NBV}}
+  url = {\url{https://github.com/mihirm3hub/sma-nbv-sim.git}}
 }
 ```
