@@ -23,18 +23,20 @@ It supports both **2D depth-mask coverage** and **3D surface-area coverage** sco
 ```
 SMA-NBV/
 ├─ assets/                     # Small demo meshes (or leave empty, see below)
-│   └─ soda-can.glb
+│   └─ sodacan.glb
 ├─ experiments/
 │   ├─ configs/                 # Hemisphere + camera setup configs
 │   │   └─ can_hemisphere.yaml
 │   └─ results/                 # Ignored: meshes, depth maps, CSVs, plots
+├─ eval_nbv.py                  # Compare sma, greedy, random methods
 ├─ fuse_tsdf.py                 # TSDF fusion from a sequence of depth maps
+├─ make_figs.py                 # Coverage vs views plotting
 ├─ render_multi_depth.py        # Render depth from multiple camera poses
 ├─ sma_nbv.py                   # SMA-guided NBV selection + TSDF fusion
 ├─ utils.py                     # Geometry, mesh, camera, and TSDF helpers
+├─ view_methods_frustums.py     # View camera frustums by methods 
 ├─ visualize.py                 # Camera candidate & mesh visualization
-├─ run_sma.py                   # Example batch runner for SMA
-├─ run_baselines.py             # Random / baseline view selectors
+
 ├─ env.yaml / requirements.txt  # Environment spec
 ├─ README.md
 └─ .gitignore
@@ -102,12 +104,57 @@ Edit `experiments/configs/can_hemisphere.yaml` to change:
 
 ---
 
-## 📊 Evaluation (optional)
+<!-- ## 📊 Evaluation (optional)
 
 If you have ground truth point clouds, you can extend with **Chamfer Distance** or **Completeness** metrics.
-(Current version only compares visually.)
+(Current version only compares visually.) -->
+
+## 📊 Metrics
+Generate Multi-Panel Summary
+Produces one figure containing:
+Coverage vs views (mean ± std),
+Final coverage @ budget,
+Views to reach 80%,
+Coverage gain per step (mean ± std).
+
+```bash
+python make_figs_gain.py \
+    --csv experiments/coverage_by_method.csv \
+    --object ALL \
+    --use-3d any \
+    --target 0.80 \
+    --out plots/summary_all_panels.png
+```
+
+**Final Coverage @ Budget** — Coverage fraction at the last view within the given budget.
+
+**Views-to-Target** — Number of views required to reach a target coverage (e.g., 80%).
+
+**Coverage Gain per Step** — Incremental coverage improvement per additional view.
+
+All metrics are saved in `coverage_by_method.csv` with the following columns:
+
+| Column              | Description                            |
+| ------------------- | -------------------------------------- |
+| `method`            | NBV method (`SMA`, `GREEDY`, `RANDOM`) |
+| `step`              | View index (1-based)                   |
+| `coverage_fraction` | Fractional surface coverage (0–1)      |
+| `seed`              | Random seed used for reproducibility   |
+| `budget`            | Maximum number of views in the run     |
+| `use_3d`            | 3D fusion flag (1/0)                   |
+| `object`            | Object name                            |
 
 ---
+
+## 📈 Results
+
+From experiments/coverage_by_method.csv:
+| Method | Coverage (%) | Views to 80% | Success Rate |
+| ------ | ------------ | ------------ | ------------ |
+| SMA    | 89.47 ± 0.3  | 3.0 ± 0.0    | 100%         |
+| Greedy | 88.92 ± 0.5  | 4.0 ± 0.0    | 100%         |
+| Random | 89.77 ± 0.6  | 12.0 ± 1.2   | 100%         |
+
 
 ## 📁 Data
 
