@@ -92,7 +92,9 @@ Outputs:
 * `experiments/results/sma_tsdf_mesh.ply` – SMA fused mesh
 * Tri-view window showing GT, baseline, and SMA reconstructions
 
-![Tri Mesh View](assets\images\tri-mesh_views.png)  
+![Tri Mesh View](assets/images/tri-mesh_views.png)  
+
+
 ---
 
 ## ⚙ Config
@@ -145,7 +147,7 @@ All metrics are saved in `coverage_by_method.csv` with the following columns:
 | `use_3d`            | 3D fusion flag (1/0)                   |
 | `object`            | Object name                            |
 
-![View Summary](assets\images\summary_stats.png)  
+![View Summary](assets/images/summary_stats.png)  
 
 ---
 
@@ -159,7 +161,7 @@ From experiments/coverage_by_method.csv:
 | Random | 89.77 ± 0.6  | 12.0 ± 1.2   | 100%         |
 
 
-![View Summary](assets\images\cam_frustrums.png)  
+![View Summary](assets/images/cam_frustrums.png)  
 
 ## 📁 Data
 
