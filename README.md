@@ -5,6 +5,8 @@ It supports both **2D depth-mask coverage** and **3D surface-area coverage** sco
 
 <!-- ![Tri-View Example](docs/tri_view_example.png) <sub>GT (left) | Baseline (center) | SMA (right)</sub> -->
 
+![Hero](assets/images/hero_image.png)  
+
 ---
 
 ## 🚀 Features
